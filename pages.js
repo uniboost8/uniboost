@@ -24,10 +24,23 @@ function box(html, wide) {
 const BOOK_MSG = { full: 'Sorry, this class just filled up. Please pick another time.', dup: 'This phone number is already booked in this class.', badcode: 'That promo code is not valid.', invalid: 'Please check the number of students.', missing: 'This class is no longer available.', error: 'Could not reach the server. Please try again.' };
 function bookModal(s, inst, after) {
   const online = DB.isOnline(s), left = DB.seatsLeft(s), me = DB.me();
-  const kinds = [['', 'Join the class · 1 seat']];
+  const kinds = [];
   if (online && DB.seatsTaken(s) === 0) kinds.push(['single', 'Private class · just me']);
   if (online && left >= 2) kinds.push(['group', 'Group of students']);
-  const courses = DB.catalog().courses.map(c => c.name);
+  
+  // تصفية المواد الخاصة بهذا الدكتور فقط
+  const allCourses = DB.catalog().courses || [];
+  let instCourses = allCourses.filter(c => {
+    const insList = typeof DB.instructorsFor === 'function' ? DB.instructorsFor(c) : [];
+    return insList.some(i => i.id === inst.id);
+  });
+  if (!instCourses.length) instCourses = allCourses; // احتياطي لو لم تُربط مسبقاً
+  
+  const currentSub = s.course && s.course !== 'Class' ? s.course : (instCourses[0]?.name || '');
+  if (s.course && s.course !== 'Class' && !instCourses.some(c => c.name === s.course)) {
+    instCourses.unshift({ name: s.course });
+  }
+
   const m = box(`<h3>Book your seat</h3>
     <p class="summary"><b style="color:#fff">${esc(cLabel(s))}</b> with ${esc(inst.name)}<br>${esc(when(s))} · ${esc(placeTxt(s))}</p>
     <form id="bf" style="margin-top:6px">
@@ -35,9 +48,15 @@ function bookModal(s, inst, after) {
       <div class="inline"><div><label>Phone / WhatsApp</label><input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel" value="${esc(me.phone || '')}"></div>
       <div><label>Email (optional)</label><input type="email" name="email" maxlength="120" value="${esc(me.email || '')}"></div></div>
       <label>University</label><input name="university" maxlength="80" value="${esc(me.university || '')}">
-      <label>Subject</label><input name="subject" maxlength="120" list="bsub" value="${esc(s.course && s.course !== 'Class' ? s.course : '')}" required><datalist id="bsub">${courses.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+      
+      <label>Subject</label>
+      <select name="subject" required>
+        ${instCourses.map(c => `<option value="${esc(c.name)}" ${c.name === currentSub ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+      </select>
+
       <label>Topic or chapter (optional)</label><input name="topic" maxlength="200">
-      ${kinds.length > 1 ? `<label>Booking type</label><select name="kind">${kinds.map(k => `<option value="${k[0]}">${k[1]}</option>`).join('')}</select>
+      <label>Upload your material (optional)</label><input name="material" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,image/*"><p class="help">Slides, notes or past papers you want the instructor to see (max 10 MB).</p>
+      ${kinds.length ? `<label>Booking type</label><select name="kind">${kinds.map(k => `<option value="${k[0]}">${k[1]}</option>`).join('')}</select>
       <div id="seatsw" style="display:none"><label>Number of students (2 to ${left})</label><input type="number" name="seats" min="2" max="${left}" value="2"></div>` : ''}
       <div class="pricebox" id="pb" style="margin-top:14px;display:none"></div>
       <label>Access code (6 to 10 digits)</label><input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6,10}" maxlength="10" required autocomplete="new-password" value="${esc(me.pin || '')}">
@@ -57,20 +76,25 @@ function bookModal(s, inst, after) {
   ['change', 'input'].forEach(ev => f.addEventListener(ev, upd)); upd();
   f.promo.addEventListener('change', () => { const r = f.promo.value.trim() ? DB.validatePromo(f.promo.value) : null; $('#pm', m.m).textContent = r ? (r.ok ? 'Promo applied: ' + (r.name || '') : 'Code not recognised') : ''; });
   $('#bx', m.m).onclick = m.close;
-  f.onsubmit = e => {
+  f.onsubmit = async e => {
     e.preventDefault(); err.style.display = 'none';
     const info = { name: f.name.value.trim(), phone: f.phone.value.trim(), email: f.email.value.trim(), university: f.university.value.trim(), subject: f.subject.value.trim(), topic: f.topic.value.trim(), kind: kind(), seats: seats(), promo: f.promo.value.trim(), pin: f.pin.value.trim() };
     if (DB.normPhone(info.phone).length < 7) { err.textContent = 'Please enter a valid phone number.'; err.style.display = 'block'; return; }
     if (!/^[0-9]{6,10}$/.test(info.pin)) { err.textContent = DB.authMsg('weakpin'); err.style.display = 'block'; return; }
     const btn = f.querySelector('.btn-primary'); btn.disabled = true;
+    const mf = f.material && f.material.files[0];
+    if (mf) {
+      if (mf.size > 10 * 1048576) { btn.disabled = false; err.textContent = 'Your file is too large (max 10 MB).'; err.style.display = 'block'; return; }
+      try { info.fileId = await DB.files.put(mf); info.fileName = mf.name; }
+      catch (x) { btn.disabled = false; err.textContent = 'Could not upload your file. Please try again.'; err.style.display = 'block'; return; }
+    }
     const r = DB.book(s.id, info);
     if (r !== 'ok') { btn.disabled = false; err.textContent = BOOK_MSG[r] || DB.authMsg(r); err.style.display = 'block'; return; }
     DB.setMe({ ...me, name: info.name, phone: info.phone, email: info.email, university: info.university, pin: info.pin });
     const q = DB.quote(info.subject || s.course, s, info.kind, info.seats), total = q.total || 0;
     const fin = () => { m.close(); DB.refresh(); after && after(); };
     if (total > 0) {
-      m.b.innerHTML = `<h3>Seat reserved ✓</h3><p class="summary">${esc(cLabel(s))} · ${esc(when(s))}</p><div id="pf" style="margin-top:6px"></div><div class="actions"><button class="btn btn-ghost" id="pl">Pay later in My Classes</button></div>`;
-      $('#pl', m.m).onclick = () => { fin(); say('Booked. Pay from My Classes'); };
+      m.b.innerHTML = `<h3>Seat reserved ✓</h3><p class="summary">${esc(cLabel(s))} · ${esc(when(s))}</p><div id="pf" style="margin-top:6px"></div>`;
       payForm($('#pf', m.m), s.id, info.phone, () => { fin(); say('Payment sent for confirmation'); }, total, { kind: q.kind, seats: q.seats, unit: q.unit });
     } else {
       m.b.innerHTML = `<h3>You are booked ✓</h3><p class="summary">${esc(cLabel(s))} · ${esc(when(s))}<br>Open <a href="my-classes.html" style="color:var(--accent2)">My Classes</a> with your phone number and access code to see the link and materials.</p><div class="actions"><button class="btn btn-primary" id="bd">Done</button></div>`;
@@ -184,8 +208,8 @@ P.courses = () => {
   const ids = id => new Set([id, ...kids(id).map(k => k.id)]);
   const cardCat = c => { const n = courses.filter(x => ids(c.id).has(x.catId)).length;
     return `<a class="cat" href="courses.html?cat=${encodeURIComponent(c.id)}"><div class="ic">${esc(c.ic || c.name[0])}</div><h3>${esc(c.name)}</h3><p>${esc(c.desc || '')}</p><small>${n} course${n === 1 ? '' : 's'}</small><span class="more">Explore ›</span></a>`; };
-  const cardCourse = c => { const p = DB.priceOf(c.name);
-    return `<a class="course" href="courses.html?cat=${encodeURIComponent(c.catId)}&course=${encodeURIComponent(c.id)}"><h3>${esc(c.name)}</h3><div class="meta">${c.mods ? c.mods + ' modules' : ''}${c.mods && c.wks ? ' · ' : ''}${c.wks ? c.wks + ' weeks' : ''}</div>${p != null ? `<span class="price">${esc(DB.money(p))}<small>per class</small></span>` : ''}<p>${esc(c.desc || '')}</p><span class="more">See instructors ›</span></a>`; };
+  const cardCourse = c =>
+    `<a class="course" href="courses.html?cat=${encodeURIComponent(c.catId)}&course=${encodeURIComponent(c.id)}"><h3>${esc(c.name)}</h3><div class="meta">${c.mods ? c.mods + ' modules' : ''}${c.mods && c.wks ? ' · ' : ''}${c.wks ? c.wks + ' weeks' : ''}</div><p>${esc(c.desc || '')}</p><span class="more">See instructors ›</span></a>`;
   const cid = qs('cat'), kid = qs('course'), c = kid && DB.courseById(kid), cat = cid && byId(cid);
   const trail = x => (x ? (x.parent && byId(x.parent) ? trail(byId(x.parent)) : '') + ` / <a href="courses.html?cat=${encodeURIComponent(x.id)}">${esc(x.name)}</a>` : '');
   if (c) {
