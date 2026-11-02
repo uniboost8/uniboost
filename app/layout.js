@@ -2,6 +2,7 @@ import './globals.css';
 import { Footer } from '../components/Footer';
 import { Header } from '../components/Header';
 import { Providers } from '../components/Providers';
+import { RouteLoader } from '../components/RouteLoader';
 
 export const viewport = {
   width: 'device-width',
@@ -53,9 +54,11 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" data-theme="dark" suppressHydrationWarning>
       <body>
+        <style dangerouslySetInnerHTML={{ __html: '.menu{position:fixed;top:68px;left:0;right:0;transform:translateY(-120%);opacity:0;visibility:hidden;pointer-events:none}body.menu-open .menu{transform:none;opacity:1;visibility:visible;pointer-events:auto}' }} />
         <script dangerouslySetInnerHTML={{ __html: BOOT }} />
         <Providers>
           <Header />
+          <RouteLoader />
           {children}
           <Footer />
         </Providers>

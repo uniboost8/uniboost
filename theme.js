@@ -5,6 +5,9 @@
     if (t !== 'light' && t !== 'dark') t = 'dark';
     document.documentElement.setAttribute('data-theme', t);
   } catch (e) {}
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () { document.body.classList.add('menu-ready'); });
+  });
   if (window.__ubTheme) return;
   window.__ubTheme = true;
   document.addEventListener('click', function (e) {

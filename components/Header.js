@@ -29,7 +29,10 @@ function ThemeSwitch() {
 
 export function Header() {
   const pathname = usePathname() || '/';
-  useEffect(() => { document.body.classList.remove('menu-open'); }, [pathname]);
+  useEffect(() => {
+    document.body.classList.remove('menu-open');
+    document.body.classList.add('menu-ready');
+  }, [pathname]);
   return (
     <>
       <header>

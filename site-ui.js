@@ -8,7 +8,7 @@
   const cur = p => (p === page || (p === 'instructors.html' && page === 'instructor.html')) ? ' style="color:var(--accent2)"' : '';
 
   const hd = document.getElementById('site-header');
-  if (hd) hd.outerHTML = `
+  if (hd && !window.__NEXT) hd.outerHTML = `
   <header>
     <div class="wrap nav">
       <a href="index.html" class="logo"><i>U</i>Uni Boost</a>
