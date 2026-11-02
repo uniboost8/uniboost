@@ -1,11 +1,13 @@
-/* Uni Boost – data layer v2.
-   Data lives in localStorage; uploaded files live in IndexedDB (this browser only). */
+/* Uni Boost data layer.
+   Live mode calls Supabase. Sample classes load only when UCC_CONFIG.preview is on. */
 (function () {
-  const KEY = 'ucc_db_v2', OLD = 'ucc_db_v1', ROLE = 'ucc_role', ME = 'ucc_me';
-  const MIN = 60000, HOUR = 3600000;
-  /* Remote mode = Supabase (see config.js). Without it the site runs fully in this browser (demo mode). */
+  if (typeof window === 'undefined') return;
+  const KEY = 'ucc_db_v2', OLD = 'ucc_db_v1', ROLE = 'ucc_role', ME = 'ucc_me', PINKEY = 'ucc_pin';
+  const MIN = 60000, HOUR = 3600000, ZONE = 'Africa/Cairo';
   const CFG = window.UCC_CONFIG || {};
-  const REMOTE = !!(CFG.url && CFG.key);
+  let REMOTE = !!(CFG.url && CFG.key);
+  let preview = false;
+  let instPin = '';
   const TOK = 'ucc_tok';
   const SBURL = () => String(CFG.url || '').replace(/\/$/, '');
   const pad = n => String(n).padStart(2, '0');
@@ -85,7 +87,8 @@
     }));
     const times = ['10:00', '12:00', '14:00', '16:00', '18:00', '20:00'];
     const slots = [];
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayParts = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()).split('-').map(Number);
+    const today = new Date(todayParts[0], todayParts[1] - 1, todayParts[2]);
     instructors.forEach((ins, k) => {
       for (let d = 0; d <= 21; d++) {
         const day = new Date(today); day.setDate(day.getDate() + d);
@@ -102,7 +105,37 @@
     });
     const seen = new Set();
     const uniq = slots.filter(s => { const q = s.instId + s.date + s.time; if (seen.has(q)) return false; seen.add(q); return true; });
-    return { password: '', settings: { ...DEF }, instructors, slots: uniq, catalog: defaultCatalog() };
+    const student = { name: 'Lina Farouk', phone: '01001234567', email: 'lina@example.com', university: 'Cairo University', pin: '123456' };
+    const book = (extra) => ({ ...student, kind: 'single', seats: 1, cur: 'EGP', at: new Date().toISOString(), ...extra });
+    const day = off => { const d = new Date(today); d.setDate(d.getDate() + off); return iso(d); };
+    uniq.push(newSlot({
+      instId: 'i1', date: day(-1), time: '18:00', mode: 'Online', course: 'Algorithms', cap: 8,
+      link: 'https://meet.google.com/demo-uniboost',
+      materials: [{ id: 'm-demo-1', kind: 'url', name: 'Week 1 notes', url: 'https://example.com/uniboost-notes' }],
+      rec: { kind: 'url', url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', addedAt: new Date().toISOString(), hours: 168 },
+      bookings: [book({ subject: 'Algorithms', topic: 'Graphs', price: 450, pay: { status: 'paid' } })]
+    }));
+    uniq.push(newSlot({
+      instId: 'i1', date: day(1), time: '09:30', mode: 'Online', course: 'Algorithms', cap: 8, leadMin: 24 * 60,
+      link: 'https://meet.google.com/demo-uniboost',
+      materials: [{ id: 'm-demo-2', kind: 'url', name: 'Practice sheet', url: 'https://example.com/uniboost-practice' }],
+      bookings: [book({ subject: 'Algorithms', topic: 'Sorting', price: 450, pay: { status: 'paid' } })]
+    }));
+    uniq.push(newSlot({
+      instId: 'i4', date: day(2), time: '19:00', mode: 'Online', course: 'Machine Learning', cap: 10,
+      bookings: [book({ subject: 'Machine Learning', topic: 'Linear models', price: 800, pay: { status: 'pending', ref: '123456789012' } })]
+    }));
+    uniq.push(newSlot({
+      instId: 'i2', date: day(3), time: '17:00', mode: 'Online', course: 'Digital Marketing', cap: 8,
+      bookings: [book({ subject: 'Digital Marketing', topic: 'Campaign brief', price: 450, pay: { status: 'unpaid' } })]
+    }));
+    instructors[0].promo = 'AHMED10';
+    return {
+      password: '', demo: true, demoBuild: 1,
+      settings: { ...DEF, instapayId: 'uniboost@instapay', instapayName: 'Uni Boost', payNote: 'Sample payment details for testing.' },
+      instructors, slots: uniq, catalog: defaultCatalog(),
+      requests: [{ id: 'q-demo', kind: 'class', name: 'Omar Samir', phone: '01009876543', email: 'omar@example.com', course: 'Thermodynamics', instId: 'i7', students: 4, times: 'Saturdays after 6 PM', mode: 'Online', note: 'Exam in three weeks', status: 'new', at: new Date().toISOString() }]
+    };
   }
 
   function migrate(txt) {
@@ -164,14 +197,14 @@
     return t.access;
   }
   const rpc = (fn, args) => xhr('POST', '/rest/v1/rpc/' + fn, args || {}, adminToken());
-  const onAdminPage = () => true;
+  const onAdminPage = () => /\/dashboard\/?$/.test(location.pathname) || /dashboard\.html$/.test(location.pathname);
   function remoteLoad() {
     const r = roleNow(); let data = null;
     try {
       if (onAdminPage() && r && r.admin) data = rpc('admin_get');
-      else if (onAdminPage() && r && r.inst) { data = rpc('inst_get', { p_inst: r.inst, p_pin: r.pin }); if (data && data.error) data = null; }
+      else if (onAdminPage() && r && r.inst) { data = rpc('inst_get', { p_inst: r.inst, p_pin: instPin }); if (data && data.error) data = null; }
     } catch (e) { data = null; }
-    if (!data && onAdminPage() && r) { sessionStorage.removeItem(ROLE); sessionStorage.removeItem(TOK); }
+    if (!data && onAdminPage() && r) { instPin = ''; sessionStorage.removeItem(ROLE); sessionStorage.removeItem(TOK); }
     if (!data) {
       try { data = rpc('get_public'); loadError = null; }
       catch (e) { loadError = e; data = { settings: {}, instructors: [], slots: [], catalog: { cats: [], courses: [] } }; }
@@ -185,12 +218,48 @@
       bookings: s.bookings || Array.from({ length: s.booked || 0 }, () => ({}))
     }));
   }
+  try {
+    const saved = JSON.parse(localStorage.getItem(ME) || 'null');
+    if (saved && saved.pin) {
+      if (!sessionStorage.getItem(PINKEY)) sessionStorage.setItem(PINKEY, String(saved.pin));
+      delete saved.pin;
+      localStorage.setItem(ME, JSON.stringify(saved));
+    }
+  } catch (e) {}
+  const wantPreview = CFG.preview === true || CFG.preview === '1' || CFG.preview === 1;
+  if (wantPreview) {
+    REMOTE = false;
+    preview = true;
+  } else if (REMOTE) {
+    try { xhr('POST', '/rest/v1/rpc/get_public', {}); preview = false; }
+    catch (e) {
+      REMOTE = false;
+      preview = false;
+      loadError = new Error('the live database did not answer, so sample classes were not loaded');
+    }
+  } else {
+    preview = false;
+    loadError = new Error('Supabase URL and key are missing');
+  }
+  function blank() {
+    db = { password: '', demo: false, settings: { ...DEF }, instructors: [], slots: [], catalog: { cats: [], courses: [] }, requests: [] };
+  }
+  function loadPreview() {
+    const DEMO = 1;
+    try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { db = null; }
+    if (!db || db.demoBuild !== DEMO || !db.instructors) db = seed();
+    db.demo = true;
+    db.demoBuild = DEMO;
+    db.settings = { ...DEF, ...(db.settings || {}) };
+    if (!db.requests) db.requests = [];
+    save();
+  }
   const R = REMOTE ? {
     err(e) { console.error(e); alert('Could not save to the server: ' + e.message + '\nPlease reload the page and try again.'); },
     up(table, rows) {
       try {
         const r = roleNow();
-        if (table === 'slots' && r && r.inst) rows.forEach(w => rpc('inst_save_slot', { p_inst: r.inst, p_pin: r.pin, p_slot: w.id, p_patch: w }));
+        if (table === 'slots' && r && r.inst) rows.forEach(w => rpc('inst_save_slot', { p_inst: r.inst, p_pin: instPin, p_slot: w.id, p_patch: w }));
         else rpc('admin_upsert', { p_table: table, p_rows: rows });
       } catch (e) { R.err(e); }
     },
@@ -199,14 +268,25 @@
   const pick = (s, keys) => { const o = { id: s.id }; keys.forEach(k => { o[k] = s[k] === undefined ? null : s[k]; }); return o; };
   const slotRow = s => { const o = { ...s }; delete o.bookings; delete o.booked; delete o.hasLink; return o; };
 
-  if (REMOTE) remoteLoad(); else load();
+  if (REMOTE) remoteLoad(); else if (preview) loadPreview(); else blank();
 
   /* ---------- helpers ---------- */
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const slotDate = s => new Date(s.date + 'T' + s.time + ':00');
-  const fmtDate = (d, long) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', long ? { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' } : { weekday: 'short', day: 'numeric', month: 'short' });
+  function zonedSlot(dateStr, timeStr) {
+    const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+    const [hh, mm] = String(timeStr || '00:00').split(':').map(Number);
+    const utc = new Date(Date.UTC(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0));
+    const fmt = new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const parts = Object.fromEntries(fmt.formatToParts(utc).map(p => [p.type, p.value]));
+    const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, (+parts.hour === 24 ? 0 : +parts.hour), +parts.minute, +parts.second);
+    return new Date(utc.getTime() - (asUtc - utc.getTime()));
+  }
+  const slotDate = s => zonedSlot(s.date, s.time);
+  const cairoNoon = d => { const [y, m, day] = String(d).slice(0, 10).split('-').map(Number); return new Date(Date.UTC(y, (m || 1) - 1, day || 1, 12, 0, 0)); };
+  const fmtDate = (d, long) => cairoNoon(d).toLocaleDateString('en-GB', Object.assign({ timeZone: ZONE }, long ? { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' } : { weekday: 'short', day: 'numeric', month: 'short' }));
+  const dateParts = d => { const parts = new Intl.DateTimeFormat('en-GB', { timeZone: ZONE, weekday: 'short', day: 'numeric', month: 'short' }).formatToParts(cairoNoon(d)); const get = t => (parts.find(p => p.type === t) || {}).value || ''; return { weekday: get('weekday'), day: get('day'), month: get('month') }; };
   const fmtTime = t => { const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`; };
-  const fmtDT = d => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const fmtDT = d => d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: ZONE }) + ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: ZONE });
   const initials = n => n.replace(/^Dr\.?\s*/i, '').split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
   const normPhone = p => String(p || '').replace(/\D/g, '').slice(-10);
   const payFiles = p => (!p ? [] : (p.files && p.files.length ? p.files : (p.fileId ? [{ id: p.fileId, name: p.fileName || 'Receipt' }] : [])));
@@ -329,9 +409,12 @@
   const phoneMatch = (b, phone) => normPhone(b.phone) === normPhone(phone);
 
   window.DB = {
-    COLORS, DEF, esc, fmtDate, fmtTime, fmtDT, initials, iso, pad, human, cls, recInfo, normPhone, files,
+    COLORS, DEF, esc, fmtDate, fmtTime, fmtDT, dateParts, initials, iso, pad, human, cls, recInfo, normPhone, files,
     remote: REMOTE,
     refresh() { if (REMOTE) remoteLoad(); },
+    get demo() { return preview || !!(db && db.demo); },
+    demoPhone: '01001234567',
+    demoPin: '123456',
     get loadError() { return loadError; },
     get loginProblem() { return loginProblem; },
     payFiles,
@@ -371,7 +454,15 @@
       let row;
       if (data.id) { row = db.instructors.find(i => i.id === data.id); Object.assign(row, data); }
       else { data.id = uid('i'); db.instructors.push(data); row = data; }
-      save(); R && R.up('instructors', [row]); return data.id;
+      const r = roleNow();
+      if (REMOTE && r && r.inst && !r.admin) {
+        try { rpc('inst_set_promo', { p_inst: r.inst, p_pin: instPin, p_promo: String(data.promo || '') }); remoteLoad(); }
+        catch (e) { if (R) R.err(e); }
+        return data.id;
+      }
+      const sent = { ...row };
+      if (!sent.pin) delete sent.pin;
+      save(); R && R.up('instructors', [sent]); return data.id;
     },
     deleteInstructor(id) {
       db.slots.filter(s => s.instId === id).forEach(s => { s.materials.forEach(m => m.fileId && files.del(m.fileId)); s.rec && s.rec.fileId && files.del(s.rec.fileId); });
@@ -489,7 +580,7 @@
     /* did the phone saved on this device book this class? */
     hasBooked(s) {
       const p = this.me().phone; if (!p) return false;
-      if (!REMOTE) return s.bookings.some(b => phoneMatch(b, p));
+      if (!REMOTE) return s.bookings.some(b => phoneMatch(b, p) && String(b.pin || '') === String(this.me().pin || ''));
       if (!mineIds) { try { mineIds = new Set(rpc('my_slot_ids', { p_phone: p, p_pin: this.me().pin || '' })); } catch (e) { mineIds = new Set(); } }
       return mineIds.has(s.id);
     },
@@ -542,13 +633,35 @@
           return rows.map(s => ({ link: '', materials: [], rec: null, ...s }));
         } catch (e) { loadError = e; return []; }
       }
-      return sortSlots(db.slots.filter(s => s.bookings.some(b => phoneMatch(b, phone))));
+      const pin = String(this.me().pin || '');
+      const hits = db.slots.filter(s => s.bookings.some(b => phoneMatch(b, phone)));
+      if (!hits.length) { this.authErr = ''; return []; }
+      if (!/^[0-9]{6,10}$/.test(pin)) { this.authErr = 'nopin'; return []; }
+      const ok = hits.filter(s => s.bookings.some(b => phoneMatch(b, phone) && String(b.pin || '') === pin));
+      if (!ok.length) { this.authErr = 'badpin'; return []; }
+      this.authErr = '';
+      return sortSlots(ok);
     },
     authErr: '',
     authMsg(c) { return ({ nopin: 'Enter your phone number and access code to see your classes.', badpin: 'Wrong phone number or access code.', locked: 'Too many wrong attempts. Please try again in 15 minutes.', legacy: 'This number was used before access codes existed. Please contact us and we will give you a code.', weakpin: 'The access code must be 6 to 10 digits.' })[c] || 'Could not check your access code.'; },
     setStudentCode(phone, pin) { if (!/^[0-9]{6,10}$/.test(pin)) return false; if (!REMOTE) return true; try { return rpc('admin_set_student_pin', { p_phone: phone, p_pin: pin }) === true; } catch (e) { R.err(e); return false; } },
-    me() { try { return JSON.parse(localStorage.getItem(ME)) || {}; } catch (e) { return {}; } },
-    setMe(o) { try { localStorage.setItem(ME, JSON.stringify(o)); } catch (e) {} },
+    me() {
+      let o = {};
+      try { o = JSON.parse(localStorage.getItem(ME)) || {}; } catch (e) { o = {}; }
+      delete o.pin;
+      try { const p = sessionStorage.getItem(PINKEY); if (p) o.pin = p; } catch (e) {}
+      return o;
+    },
+    setMe(o) {
+      const next = { ...(o || {}) };
+      const pin = next.pin;
+      delete next.pin;
+      try { localStorage.setItem(ME, JSON.stringify(next)); } catch (e) {}
+      try {
+        if (pin) sessionStorage.setItem(PINKEY, String(pin));
+        else sessionStorage.removeItem(PINKEY);
+      } catch (e) {}
+    },
 
     /* class management */
     updateClass(id, patch, applyAll) {
@@ -598,14 +711,19 @@
         if (!isAdm) { sessionStorage.removeItem(TOK); loginProblem = 'notadmin'; return false; }
         sessionStorage.setItem(ROLE, JSON.stringify({ admin: true })); remoteLoad(); return true;
       }
-      if (db.password && a === db.password) { sessionStorage.setItem(ROLE, JSON.stringify({ admin: true })); return true; } return false;
+      const pass = String(a || '');
+      if ((db.password && pass === String(db.password)) || (preview && pass === 'demo')) {
+        sessionStorage.setItem(ROLE, JSON.stringify({ admin: true })); return true;
+      }
+      return false;
     },
     loginInstructor(id, pin) {
       if (REMOTE) {
         try {
           const d = rpc('inst_get', { p_inst: id, p_pin: String(pin).trim() });
           if (!d || d.error) return false;
-          sessionStorage.setItem(ROLE, JSON.stringify({ inst: id, pin: String(pin).trim() })); remoteLoad(); return true;
+          instPin = String(pin).trim();
+          sessionStorage.setItem(ROLE, JSON.stringify({ inst: id })); remoteLoad(); return true;
         } catch (e) { return false; }
       }
       const i = this.instructor(id);
@@ -613,7 +731,7 @@
       return false;
     },
     role() { return roleNow(); },
-    logout() { sessionStorage.removeItem(ROLE); sessionStorage.removeItem(TOK); if (REMOTE) remoteLoad(); },
+    logout() { instPin = ''; sessionStorage.removeItem(ROLE); sessionStorage.removeItem(TOK); if (REMOTE) remoteLoad(); },
     isAdmin() { const r = this.role(); return !!(r && r.admin); },
     setPassword(p) { if (!REMOTE) { db.password = p; save(); } },
 

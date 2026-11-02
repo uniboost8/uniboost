@@ -1,7 +1,10 @@
 /* Shared header / menu / footer / toast / reveal for every page */
 (function () {
+  if (typeof window === 'undefined') return;
+  const DB = window.DB;
+  const safeUrl = window.safeUrl;
   const page = window.__PG || location.pathname.split('/').pop() || 'index.html';
-  const links = [['Home', 'index.html', 'index.html'], ['Instructors', 'instructors.html', 'instructors.html'], ['Courses', 'courses.html', 'courses.html'], ['Schedule', 'schedule.html', 'schedule.html'], ['My Classes', 'my-classes.html', 'my-classes.html'], ['Recordings', 'recordings.html', 'recordings.html']];
+  const links = [['Home', 'index.html', 'index.html'], ['Instructors', 'instructors.html', 'instructors.html'], ['Courses', 'courses.html', 'courses.html'], ['Schedule', 'schedule.html', 'schedule.html'], ['My Classes', 'my-classes.html', 'my-classes.html'], ['Recordings', 'recordings.html', 'recordings.html'], ['Dashboard', 'dashboard.html', 'dashboard.html']];
   const cur = p => (p === page || (p === 'instructors.html' && page === 'instructor.html')) ? ' style="color:var(--accent2)"' : '';
 
   const hd = document.getElementById('site-header');
@@ -9,8 +12,13 @@
   <header>
     <div class="wrap nav">
       <a href="index.html" class="logo"><i>U</i>Uni Boost</a>
+      <nav class="nav-links" aria-label="Primary">${links.map(l => `<a href="${l[1]}"${cur(l[2]) ? ' aria-current="page"' : ''}>${l[0]}</a>`).join('')}</nav>
       <div class="nav-right">
-        <a class="btn btn-primary btn-sm" href="schedule.html">Book a class</a>
+        <div class="theme-switch" role="group" aria-label="Color theme">
+          <button type="button" data-set-theme="light">Light</button>
+          <button type="button" data-set-theme="dark">Dark</button>
+        </div>
+        <a class="btn btn-primary btn-sm nav-book" href="schedule.html">Book a class</a>
         <button class="burger" type="button" aria-label="Menu" aria-expanded="false"><span></span></button>
       </div>
     </div>
@@ -18,6 +26,11 @@
   <div class="menu" id="menu">
     <div class="wrap">
       ${links.map(l => `<a class="item" href="${l[1]}" ${cur(l[2])}>${l[0]}</a>`).join('')}
+      <a class="btn btn-primary menu-book" href="schedule.html">Book a class</a>
+      <div class="theme-switch" role="group" aria-label="Color theme">
+        <button type="button" data-set-theme="light">Light</button>
+        <button type="button" data-set-theme="dark">Dark</button>
+      </div>
     </div>
   </div>`;
 
@@ -29,7 +42,7 @@
         <a href="index.html" class="logo"><i>U</i>Uni Boost</a>
         <nav>${links.map(l => `<a href="${l[1]}" >${l[0]}</a>`).join('')}</nav>
       </div>
-      <p class="copy">© 2026 Uni Boost · Giza, Egypt. All rights reserved.</p>
+      <p class="copy">© 2026 Uni Boost · Giza, Egypt. All rights reserved. · <a href="privacy.html">Privacy and cancellation</a></p>
     </div>
   </footer>`;
 
@@ -37,13 +50,49 @@
   if (window.DB && DB.loadError) document.body.insertAdjacentHTML('afterbegin', '<div class="warn" style="margin:0;border-radius:0;text-align:center">⚠ Could not reach the server (' + DB.esc(DB.loadError.message) + '). Check your connection and reload the page.</div>');
 
   const burger = document.querySelector('.burger');
-  const setMenu = open => { document.body.classList.toggle('menu-open', open); burger && burger.setAttribute('aria-expanded', open); };
-  burger && burger.addEventListener('click', () => setMenu(!document.body.classList.contains('menu-open')));
-  document.querySelectorAll('#menu a').forEach(a => a.addEventListener('click', () => setMenu(false)));
-  addEventListener('keydown', e => e.key === 'Escape' && setMenu(false));
+  const setMenu = open => { document.body.classList.toggle('menu-open', open); burger && burger.setAttribute('aria-expanded', String(open)); };
+  if (!window.__NEXT) {
+    burger && burger.addEventListener('click', () => setMenu(!document.body.classList.contains('menu-open')));
+    document.querySelectorAll('#menu a').forEach(a => a.addEventListener('click', () => setMenu(false)));
+  }
+  addEventListener('keydown', e => e.key === 'Escape' && document.body.classList.remove('menu-open'));
+  addEventListener('resize', () => { if (innerWidth >= 1080) document.body.classList.remove('menu-open'); });
+  const req = document.getElementById('reqbar');
+  const reqBtn = req && req.querySelector('button');
+  if (!window.__NEXT && reqBtn) reqBtn.addEventListener('click', () => window.requestForm(/course/i.test(reqBtn.textContent) ? 'course' : 'class'));
 
   const toast = document.getElementById('toast');
   let tt;
+  /* Shared list paging: 12 records per page, hidden when a list is shorter than that. */
+  window.ubSlice = function (list, page, size) {
+    size = size || 12;
+    const total = list.length, pages = Math.max(1, Math.ceil(total / size) || 1);
+    let p = parseInt(page, 10) || 1;
+    if (p < 1) p = 1;
+    if (p > pages) p = pages;
+    const start = (p - 1) * size;
+    return { rows: list.slice(start, start + size), page: p, pages: pages, total: total, size: size };
+  };
+  window.ubPager = function (page, pages, total, opts) {
+    opts = opts || {};
+    const size = opts.size || 12;
+    if (total <= size) return '';
+    const extra = opts.extra ? opts.extra + ' ' : '';
+    const from = (page - 1) * size + 1, to = Math.min(total, page * size);
+    const nums = [], push = n => { if (n >= 1 && n <= pages && nums.indexOf(n) === -1) nums.push(n); };
+    push(1);
+    for (let n = page - 2; n <= page + 2; n++) push(n);
+    push(pages);
+    nums.sort((a, b) => a - b);
+    let links = '', prev = 0;
+    nums.forEach(n => {
+      if (prev && n - prev > 1) links += '<span class="pager-gap">…</span>';
+      links += '<button type="button" class="mini' + (n === page ? ' on' : '') + '" ' + extra + 'data-pg="' + n + '"' + (n === page ? ' aria-current="page"' : '') + '>' + n + '</button>';
+      prev = n;
+    });
+    return '<nav class="pager" aria-label="Pagination"><button type="button" class="mini" ' + extra + 'data-pg="' + (page - 1) + '"' + (page <= 1 ? ' disabled' : '') + '>Previous</button>' + links + '<span class="pager-count">' + from + '–' + to + ' of ' + total + '</span><button type="button" class="mini" ' + extra + 'data-pg="' + (page + 1) + '"' + (page >= pages ? ' disabled' : '') + '>Next</button></nav>';
+  };
+
   window.say = function (msg) {
     toast.textContent = msg; toast.classList.add('show');
     clearTimeout(tt); tt = setTimeout(() => toast.classList.remove('show'), 2600);
@@ -72,7 +121,7 @@
     let m = document.getElementById('reqModal'); if (m) m.remove();
     m = document.createElement('div'); m.className = 'modal open'; m.id = 'reqModal';
     m.innerHTML = `<div class="box"><h3>${isC ? 'Request a course' : 'Request a class'}</h3>
-      <p class="summary">${isC ? 'Can’t find the course you need? Tell us what and when, and we’ll arrange it.' : 'Can’t find a time that suits you? Tell us the time you need and we’ll try to arrange it.'}${o.inst ? '<br>Instructor: <b style="color:#fff">' + esc(o.inst) + '</b>' : ''}</p>
+      <p class="summary">${isC ? 'Can’t find the course you need? Tell us what and when, and we’ll arrange it.' : 'Can’t find a time that suits you? Tell us the time you need and we’ll try to arrange it.'}${o.inst ? '<br>Instructor: <b style="color:var(--text)">' + esc(o.inst) + '</b>' : ''}</p>
       <form id="rqf" style="margin-top:14px">
         <label>${isC ? 'Course name — type the course you need' : 'Subject / course'}</label><input name="course" required maxlength="120" ${isC ? 'autocomplete="off"' : 'list="rqc"'} value="${esc(o.course || '')}" placeholder="${isC ? 'Write the course name, e.g. Thermodynamics 2' : 'e.g. Heat Transfer'}">${isC ? '' : `<datalist id="rqc">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>`}
         <div class="inline"><div><label>How many students?</label><input type="number" name="students" min="1" max="500" value="1" required></div>
@@ -82,7 +131,7 @@
         <div class="inline"><div><label>Phone / WhatsApp</label><input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel"></div>
         <div><label>Email (optional)</label><input type="email" name="email" maxlength="120" autocomplete="email"></div></div>
         <label>Notes (optional)</label><input name="note" maxlength="300">
-        <div class="help" id="rqe" style="color:#ff8a8a;margin-top:8px"></div>
+        <div class="help err" id="rqe" style="margin-top:8px"></div>
         <div class="actions"><button type="button" class="btn btn-ghost" id="rqx">Cancel</button><button class="btn btn-primary">Send request</button></div>
       </form></div>`;
     document.body.appendChild(m);
@@ -103,7 +152,7 @@
   window.payForm = function (el, slotId, phone, done, price, bk) {
     const s = DB.slot(slotId), S = DB.settings(), p = price != null ? price : DB.priceOf(s.course), esc = DB.esc;
     const grp = !!bk && bk.kind === 'group', n = grp ? (+bk.seats || 2) : 1, each = grp && bk.unit != null && S.groupMode !== 'total' ? DB.money(+bk.unit) : '';
-    const grpNote = grp ? `<div class="help" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px"><b style="color:#fff">Group booking · ${n} students.</b> ${each ? 'Each student can send their own share (' + esc(each) + ') separately — ' : 'Students can split the amount and each send their own part — '}then <b>upload every transfer screenshot</b> below (you can select several images at once) and write each reference number.</div>` : '';
+    const grpNote = grp ? `<div class="help" style="margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px"><b style="color:var(--text)">Group booking · ${n} students.</b> ${each ? 'Each student can send their own share (' + esc(each) + ') separately — ' : 'Students can split the amount and each send their own part — '}then <b>upload every transfer screenshot</b> below (you can select several images at once) and write each reference number.</div>` : '';
     const ipa = (S.instapayId || '').trim();
     const link = /^https?:\/\//i.test(S.instapayLink || '') ? S.instapayLink.trim() : '';
     const steps = `<div class="stepper"><span class="on done"><i>✓</i>Seat reserved</span><span class="on"><i>2</i>Pay</span><span><i>3</i>Confirmation</span></div>`;

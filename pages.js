@@ -1,16 +1,44 @@
 /* Public pages for Uni Boost. Built on DB (data.js) and the shared UI (site-ui.js). */
 (function () {
 'use strict';
+const DB = window.DB;
+const safeUrl = window.safeUrl;
 const { esc } = DB, C = DB.COLORS;
 const $ = s => document.querySelector(s), $$ = (s, r) => [...(r || document).querySelectorAll(s)];
 const qs = k => new URLSearchParams(location.search).get(k);
-const pg = (location.pathname.split('/').pop() || 'index.html').replace(/\.html$/, '') || 'index';
+const pg = (typeof location === 'undefined' ? 'index' : (location.pathname.split('/').pop() || 'index.html').replace(/\.html$/, '')) || 'index';
+function route(file, query) {
+  const q = query || '';
+  if (!window.__NEXT) return file + q;
+  if (file === 'instructor.html') {
+    const p = new URLSearchParams(q.replace(/^\?/, ''));
+    const id = p.get('id') || '';
+    p.delete('id');
+    const rest = p.toString();
+    return '/instructors/' + encodeURIComponent(id) + (rest ? '?' + rest : '');
+  }
+  const map = {
+    'index.html': '/',
+    'instructors.html': '/instructors',
+    'courses.html': '/courses',
+    'schedule.html': '/schedule',
+    'my-classes.html': '/my-classes',
+    'recordings.html': '/recordings',
+    'privacy.html': '/privacy'
+  };
+  return (map[file] || '/') + q;
+}
 const av = (i, c) => { const k = C[(+i.color || 0) % C.length] || C[0]; return `<div class="avatar ${c || ''}" style="${i.photo ? `background-image:url('${esc(safeUrl(i.photo))}')` : `background:linear-gradient(135deg,${k[0]},${k[1]})`}">${i.photo ? '' : esc(DB.initials(i.name))}</div>`; };
 const tags = i => `<div class="tags">${(i.tags || []).map(t => `<span>${esc(t)}</span>`).join('')}</div>`;
 const openCount = i => DB.slots(i.id).filter(s => DB.seatsLeft(s) > 0).length;
 const when = s => `${DB.fmtDate(s.date, true)} · ${DB.fmtTime(s.time)}`;
-const say = m => window.say && say(m);
+const say = m => window.say && window.say(m);
 const empty = (el, msg) => { el.innerHTML = `<div class="empty">${msg}</div>`; };
+const slice = (list, page) => (window.ubSlice ? window.ubSlice(list, page) : { rows: list, page: 1, pages: 1, total: list.length, size: 12 });
+const pager = (page, pages, total, key) => (window.ubPager ? window.ubPager(page, pages, total, key ? { extra: 'data-key="' + key + '"' } : {}) : '');
+function bindPager(root, apply) {
+  $$('.pager [data-pg]', root).forEach(b => b.onclick = () => { if (b.disabled) return; apply(+b.dataset.pg, b.dataset.key || ''); });
+}
 
 function box(html, wide) {
   const m = document.createElement('div'); m.className = 'modal open';
@@ -42,7 +70,7 @@ function bookModal(s, inst, after) {
   }
 
   const m = box(`<h3>Book your seat</h3>
-    <p class="summary"><b style="color:#fff">${esc(cLabel(s))}</b> with ${esc(inst.name)}<br>${esc(when(s))} · ${esc(placeTxt(s))}</p>
+    <p class="summary"><b style="color:var(--text)">${esc(cLabel(s))}</b> with ${esc(inst.name)}<br>${esc(when(s))} · ${esc(placeTxt(s))}</p>
     <form id="bf" style="margin-top:6px">
       <label>Your name</label><input name="name" required maxlength="80" autocomplete="name" value="${esc(me.name || '')}">
       <div class="inline"><div><label>Phone / WhatsApp</label><input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel" value="${esc(me.phone || '')}"></div>
@@ -61,6 +89,7 @@ function bookModal(s, inst, after) {
       <div class="pricebox" id="pb" style="margin-top:14px;display:none"></div>
       <label>Access code (6 to 10 digits)</label><input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6,10}" maxlength="10" required autocomplete="new-password" value="${esc(me.pin || '')}">
       <p class="help">You will use your phone number and this code to see your classes. Keep it safe.</p>
+      <p class="help">Class times are Egypt time. InstaPay stays pending until Uni Boost confirms it. You can cancel from My Classes before the class starts. <a href="${route('privacy.html')}" style="color:var(--accent2)">Privacy and cancellation</a>.</p>
       <label>Promo code (optional)</label><input name="promo" maxlength="30" autocomplete="off"><div class="help" id="pm"></div>
       <p class="warn" id="be" style="display:none;margin-top:12px"></p>
       <div class="actions"><button type="button" class="btn btn-ghost" id="bx">Cancel</button><button class="btn btn-primary">Confirm booking</button></div>
@@ -97,7 +126,7 @@ function bookModal(s, inst, after) {
       m.b.innerHTML = `<h3>Seat reserved ✓</h3><p class="summary">${esc(cLabel(s))} · ${esc(when(s))}</p><div id="pf" style="margin-top:6px"></div>`;
       payForm($('#pf', m.m), s.id, info.phone, () => { fin(); say('Payment sent for confirmation'); }, total, { kind: q.kind, seats: q.seats, unit: q.unit });
     } else {
-      m.b.innerHTML = `<h3>You are booked ✓</h3><p class="summary">${esc(cLabel(s))} · ${esc(when(s))}<br>Open <a href="my-classes.html" style="color:var(--accent2)">My Classes</a> with your phone number and access code to see the link and materials.</p><div class="actions"><button class="btn btn-primary" id="bd">Done</button></div>`;
+      m.b.innerHTML = `<h3>You are booked ✓</h3><p class="summary">${esc(cLabel(s))} · ${esc(when(s))}<br>Open <a href="${route('my-classes.html')}" style="color:var(--accent2)">My Classes</a> with your phone number and access code to see the link and materials.</p><div class="actions"><button class="btn btn-primary" id="bd">Done</button></div>`;
       $('#bd', m.m).onclick = fin;
     }
   };
@@ -106,84 +135,128 @@ function bookModal(s, inst, after) {
 const P = {};
 
 /* ---------------- home ---------------- */
+function paintHomeArt() {
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  const t = $('#tree-svg');
+  if (t) {
+    const pts = [[240, 50], [140, 130], [340, 130], [90, 220], [190, 220], [290, 220], [390, 220]], ed = [[0, 1], [0, 2], [1, 3], [1, 4], [2, 5], [2, 6]];
+    const bg = light ? '#e7eef8' : '#070d19', line = light ? '#1d4ed8' : '#3b82f6', node = light ? '#1e40af' : '#1e3a8a', root = light ? '#1d4ed8' : '#2563eb', ring = light ? '#1d4ed8' : '#60a5fa';
+    t.innerHTML = `<rect width="480" height="300" fill="${bg}"/>` + ed.map(e => `<line x1="${pts[e[0]][0]}" y1="${pts[e[0]][1]}" x2="${pts[e[1]][0]}" y2="${pts[e[1]][1]}" stroke="${line}" stroke-width="3"/>`).join('') + pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="22" fill="${i ? node : root}" stroke="${ring}" stroke-width="3"/>`).join('');
+  }
+  const b = $('#bars-svg');
+  if (b) {
+    const bg = light ? '#e7eef8' : '#0f1b30', bar = light ? '#1d4ed8' : '#2563eb', hot = light ? '#0369a1' : '#60a5fa';
+    b.innerHTML = `<rect width="480" height="300" fill="${bg}"/>` + [90, 140, 110, 180, 150, 220, 250].map((h, i) => `<rect x="${50 + i * 58}" y="${270 - h}" width="38" height="${h}" rx="6" fill="${i === 6 ? hot : bar}"/>`).join('');
+  }
+}
+if (!window.__ubArt) {
+  window.__ubArt = true;
+  document.addEventListener('ub-theme', paintHomeArt);
+}
 P.index = () => {
   const cv = $('#hero-canvas');
-  if (cv) {
+  if (cv && !cv.dataset.on) {
+    cv.dataset.on = '1';
     const x = cv.getContext('2d'), N = []; let W, H;
     const rs = () => { W = cv.width = cv.clientWidth; H = cv.height = cv.clientHeight; }; rs(); addEventListener('resize', rs);
     for (let i = 0; i < 46; i++) N.push({ x: Math.random(), y: Math.random(), vx: (Math.random() - .5) * .0007, vy: (Math.random() - .5) * .0007 });
     const still = matchMedia('(prefers-reduced-motion:reduce)').matches;
     (function f() {
+      if (!cv.isConnected) return;
+      const light = document.documentElement.getAttribute('data-theme') === 'light';
       x.clearRect(0, 0, W, H);
       if (!still) N.forEach(a => { a.x = (a.x + a.vx + 1) % 1; a.y = (a.y + a.vy + 1) % 1; });
       for (let i = 0; i < N.length; i++) for (let j = i + 1; j < N.length; j++) {
         const dx = (N[i].x - N[j].x) * W, dy = (N[i].y - N[j].y) * H, d = Math.hypot(dx, dy);
-        if (d < 110) { x.strokeStyle = 'rgba(96,165,250,' + (1 - d / 110) * .45 + ')'; x.beginPath(); x.moveTo(N[i].x * W, N[i].y * H); x.lineTo(N[j].x * W, N[j].y * H); x.stroke(); }
+        if (d < 110) { x.strokeStyle = 'rgba(' + (light ? '29,78,216' : '96,165,250') + ',' + (1 - d / 110) * .45 + ')'; x.beginPath(); x.moveTo(N[i].x * W, N[i].y * H); x.lineTo(N[j].x * W, N[j].y * H); x.stroke(); }
       }
-      N.forEach(a => { x.fillStyle = '#60a5fa'; x.beginPath(); x.arc(a.x * W, a.y * H, 2.5, 0, 7); x.fill(); });
+      N.forEach(a => { x.fillStyle = light ? '#1d4ed8' : '#60a5fa'; x.beginPath(); x.arc(a.x * W, a.y * H, 2.5, 0, 7); x.fill(); });
       if (!still) requestAnimationFrame(f);
     })();
   }
   $$('[data-count]').forEach(b => {
+    if (b.dataset.counted) return;
+    b.dataset.counted = '1';
     const t = +b.dataset.count, sfx = b.dataset.suffix || '', cm = b.dataset.comma; let st = null;
     const step = ts => { st = st || ts; const p = Math.min((ts - st) / 1200, 1), v = Math.round(t * p); b.textContent = (cm ? v.toLocaleString('en-US') : v) + (p === 1 ? sfx : ''); if (p < 1) requestAnimationFrame(step); };
     new IntersectionObserver((e, o) => { if (e[0].isIntersecting) { o.disconnect(); requestAnimationFrame(step); } }).observe(b);
   });
-  const t = $('#tree-svg');
-  if (t) {
-    const pts = [[240, 50], [140, 130], [340, 130], [90, 220], [190, 220], [290, 220], [390, 220]], ed = [[0, 1], [0, 2], [1, 3], [1, 4], [2, 5], [2, 6]];
-    t.innerHTML = '<rect width="480" height="300" fill="#070d19"/>' + ed.map(e => `<line x1="${pts[e[0]][0]}" y1="${pts[e[0]][1]}" x2="${pts[e[1]][0]}" y2="${pts[e[1]][1]}" stroke="#3b82f6" stroke-width="3"/>`).join('') + pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="22" fill="${i ? '#1e3a8a' : '#2563eb'}" stroke="#60a5fa" stroke-width="3"/>`).join('');
-  }
-  const b = $('#bars-svg');
-  if (b) b.innerHTML = '<rect width="480" height="300" fill="#0f1b30"/>' + [90, 140, 110, 180, 150, 220, 250].map((h, i) => `<rect x="${50 + i * 58}" y="${270 - h}" width="38" height="${h}" rx="6" fill="${i === 6 ? '#60a5fa' : '#2563eb'}"/>`).join('');
+  paintHomeArt();
   const cat = DB.catalog(), top = cat.cats.filter(c => !c.parent), el = $('#home-cats');
-  el.innerHTML = top.map(c => {
+  if (!el) return;
+  let page = 1;
+  const card = c => {
     const ids = new Set([c.id, ...cat.cats.filter(k => k.parent === c.id).map(k => k.id)]), n = cat.courses.filter(x => ids.has(x.catId)).length;
-    return `<a class="cat" href="courses.html?cat=${encodeURIComponent(c.id)}"><div class="ic">${esc(c.ic || c.name[0])}</div><h3>${esc(c.name)}</h3><p>${esc(c.desc || '')}</p><small>${n} course${n === 1 ? '' : 's'}</small><span class="more">Explore ›</span></a>`;
-  }).join('') || '<div class="empty" style="grid-column:1/-1">Courses will appear here soon.</div>';
+    return `<a class="cat" href="${route('courses.html', '?cat=' + encodeURIComponent(c.id))}"><div class="ic">${esc(c.ic || c.name[0])}</div><h3>${esc(c.name)}</h3><p>${esc(c.desc || '')}</p><small>${n} course${n === 1 ? '' : 's'}</small><span class="more">Explore ›</span></a>`;
+  };
+  const draw = () => {
+    const cut = slice(top, page); page = cut.page;
+    el.innerHTML = cut.rows.map(card).join('') || '<div class="empty" style="grid-column:1/-1">Courses will appear here soon.</div>';
+    let host = document.getElementById('home-pager');
+    if (!host) { host = document.createElement('div'); host.id = 'home-pager'; el.insertAdjacentElement('afterend', host); }
+    host.innerHTML = pager(cut.page, cut.pages, cut.total);
+    bindPager(host, n => { page = n; draw(); });
+  };
+  draw();
 };
 
 /* ---------------- instructors ---------------- */
 P.instructors = () => {
-  const g = $('#grid'), all = DB.instructors().sort((a, b) => a.name.localeCompare(b.name)); let tag = 'All', q = '';
+  const g = $('#grid'), all = DB.instructors().sort((a, b) => a.name.localeCompare(b.name)); let tag = 'All', q = '', page = 1;
+  let host = document.getElementById('grid-pager');
+  if (g && !host) { host = document.createElement('div'); host.id = 'grid-pager'; g.insertAdjacentElement('afterend', host); }
   const draw = () => {
     const l = all.filter(i => (tag === 'All' || (i.tags || []).includes(tag)) && (i.name + ' ' + (i.title || '') + ' ' + (i.university || '') + ' ' + (i.tags || []).join(' ')).toLowerCase().includes(q));
-    g.innerHTML = l.map(i => { const n = openCount(i); return `<a class="inst" href="instructor.html?id=${encodeURIComponent(i.id)}">${av(i)}<h3>${esc(i.name)}</h3><p class="role">${esc(i.title || '')}</p><p class="uni">${esc(i.university || '')}</p>${tags(i)}<span class="avail${n ? '' : ' none'}">${n ? n + ' open class' + (n > 1 ? 'es' : '') : 'No open classes yet'}</span></a>`; }).join('') || '<div class="empty">No instructors match your search.</div>';
+    const cut = slice(l, page); page = cut.page;
+    g.innerHTML = cut.rows.map(i => { const n = openCount(i); return `<a class="inst" href="${route('instructor.html', '?id=' + encodeURIComponent(i.id))}">${av(i)}<h3>${esc(i.name)}</h3><p class="role">${esc(i.title || '')}</p><p class="uni">${esc(i.university || '')}</p>${tags(i)}<span class="avail${n ? '' : ' none'}">${n ? n + ' open class' + (n > 1 ? 'es' : '') : 'No open classes yet'}</span></a>`; }).join('') || '<div class="empty">No instructors match your search.</div>';
+    if (host) { host.innerHTML = pager(cut.page, cut.pages, cut.total); bindPager(host, n => { page = n; draw(); }); }
   };
   const all_t = ['All']; all.forEach(i => (i.tags || []).forEach(t => all_t.includes(t) || all_t.push(t)));
   const f = $('#filters'); f.innerHTML = all_t.map(t => `<button type="button" class="fchip${t === 'All' ? ' on' : ''}">${esc(t)}</button>`).join('');
-  $$('.fchip', f).forEach(b => b.onclick = () => { tag = b.textContent; $$('.fchip', f).forEach(x => x.classList.toggle('on', x === b)); draw(); });
-  $('#q').oninput = e => { q = e.target.value.toLowerCase(); draw(); };
+  $$('.fchip', f).forEach(b => b.onclick = () => { tag = b.textContent; page = 1; $$('.fchip', f).forEach(x => x.classList.toggle('on', x === b)); draw(); });
+  $('#q').oninput = e => { q = e.target.value.toLowerCase(); page = 1; draw(); };
   draw();
 };
 
 /* ---------------- one instructor ---------------- */
 P.instructor = () => {
-  const m = $('#main'), id = qs('id'), i = DB.instructor(id);
-  if (!i) { m.innerHTML = '<div class="empty" style="margin:60px 0">Instructor not found. <a href="instructors.html" style="color:var(--accent2)">See all instructors</a>.</div>'; return; }
+  const pathId = window.__NEXT ? decodeURIComponent((location.pathname.split('/').filter(Boolean)[1] || '')) : '';
+  const m = $('#main'), id = qs('id') || pathId, i = id && DB.instructor(id);
+  if (!m) return;
+  if (!i) { m.innerHTML = '<div class="empty" style="margin:60px 0">Instructor not found. <a href="' + route('instructors.html') + '" style="color:var(--accent2)">See all instructors</a>.</div>'; return; }
   document.title = i.name + ' · Uni Boost';
-  const want = qs('slot'); let sel = null;
+  const want = qs('slot'); let sel = null, datePage = 1, slotPage = 1;
   const days = () => { const g = {}; DB.slots(id).forEach(s => (g[s.date] = g[s.date] || []).push(s)); return g; };
-  m.innerHTML = `<section class="page-hero"><p class="crumbs"><a href="index.html">Home</a> / <a href="instructors.html">Instructors</a> / ${esc(i.name)}</p>
+  m.innerHTML = `<section class="page-hero"><p class="crumbs"><a href="${route('index.html')}">Home</a> / <a href="${route('instructors.html')}">Instructors</a> / ${esc(i.name)}</p>
     <div class="profile">${av(i, 'lg')}<div><h1>${esc(i.name)}</h1><p class="role">${esc([i.title, i.university].filter(Boolean).join(' · '))}</p></div></div>
     <p class="bio sub" style="max-width:640px">${esc(i.bio || '')}</p>${tags(i)}</section>
-    <div class="panel"><h2>Book a class</h2><p class="sub" style="margin:0">Pick a date, then a time.</p><div class="dates" id="dates"></div><div class="slots" id="slots"></div>
+    <div class="panel"><h2>Book a class</h2><p class="sub" style="margin:0">Pick a date, then a time.</p><div class="dates" id="dates"></div><div id="date-pager"></div><div class="slots" id="slots"></div><div id="slot-pager"></div>
     <div class="reqbar" id="reqbar"><span>No time that works for you?</span><button class="btn btn-primary" type="button">Request a class</button></div></div>`;
-  $('#reqbar button').onclick = () => requestForm('class', { inst: i.name, instId: i.id });
+  $('#reqbar button').onclick = () => window.requestForm('class', { inst: i.name, instId: i.id });
   const draw = () => {
     const g = days(), keys = Object.keys(g).sort();
-    if (!sel || !g[sel]) sel = keys[0];
-    $('#dates').innerHTML = keys.map(k => { const d = new Date(k + 'T00:00:00'), free = g[k].filter(s => DB.seatsLeft(s) > 0).length;
-      return `<button type="button" class="dpill${k === sel ? ' on' : ''}" data-k="${k}"><small>${d.toLocaleDateString('en-GB', { weekday: 'short' })}</small><b>${d.getDate()}</b><small>${d.toLocaleDateString('en-GB', { month: 'short' })}</small><em>${free} open</em></button>`; }).join('') || '<div class="empty" style="width:100%">No open classes right now. Send a request and we will arrange one.</div>';
-    $$('.dpill').forEach(b => b.onclick = () => { sel = b.dataset.k; draw(); });
+    if (!sel || !g[sel]) { sel = keys[0] || null; slotPage = 1; }
+    const dcut = slice(keys, datePage); datePage = dcut.page;
+    if (sel && dcut.rows.length && dcut.rows.indexOf(sel) < 0) { sel = dcut.rows[0]; slotPage = 1; }
+    $('#dates').innerHTML = dcut.rows.map(k => { const d = DB.dateParts(k), free = g[k].filter(s => DB.seatsLeft(s) > 0).length;
+      return `<button type="button" class="dpill${k === sel ? ' on' : ''}" data-k="${k}"><small>${esc(d.weekday)}</small><b>${esc(d.day)}</b><small>${esc(d.month)}</small><em>${free} open</em></button>`; }).join('') || '<div class="empty" style="width:100%">No open classes right now. Send a request and we will arrange one.</div>';
+    $('#date-pager').innerHTML = pager(dcut.page, dcut.pages, dcut.total, 'dates');
+    $$('.dpill').forEach(b => b.onclick = () => { sel = b.dataset.k; slotPage = 1; draw(); });
+    const day = g[sel] || [], scut = slice(day, slotPage); slotPage = scut.page;
     const box_ = $('#slots'); box_.innerHTML = '';
-    (g[sel] || []).forEach(s => {
+    scut.rows.forEach(s => {
       const left = DB.seatsLeft(s), mine = DB.hasBooked(s), b = document.createElement('button'); b.type = 'button'; b.className = 'slot'; b.disabled = left <= 0 || mine;
       b.innerHTML = `<b>${esc(DB.fmtTime(s.time))}</b><small>${esc(cLabel(s))} · ${esc(placeTxt(s))}<br>${mine ? 'You are booked ✓' : left > 0 ? left + ' seat' + (left > 1 ? 's' : '') + ' left' : 'Full'}</small>`;
       b.onclick = () => bookModal(s, i, draw); box_.appendChild(b);
     });
+    $('#slot-pager').innerHTML = pager(scut.page, scut.pages, scut.total, 'slots');
+    bindPager(m, (n, key) => { if (key === 'slots') slotPage = n; else if (key === 'dates') datePage = n; else return; draw(); });
   };
-  const ws = want && DB.slot(want); if (ws && ws.instId === id) sel = ws.date;
+  const ws = want && DB.slot(want); if (ws && ws.instId === id) {
+    sel = ws.date;
+    const idx = Object.keys(days()).sort().indexOf(ws.date);
+    if (idx >= 0) datePage = Math.floor(idx / 12) + 1;
+  }
   draw();
   if (ws && ws.instId === id && DB.seatsLeft(ws) > 0 && !DB.hasBooked(ws)) bookModal(ws, i, draw);
 };
@@ -191,46 +264,74 @@ P.instructor = () => {
 /* ---------------- schedule ---------------- */
 P.schedule = () => {
   const L = $('#list'), sel = $('#inst');
+  if (!L || !sel) return;
+  const pre = qs('inst');
+  sel.innerHTML = '<option value="">All instructors</option>';
   DB.instructors().sort((a, b) => a.name.localeCompare(b.name)).forEach(i => sel.insertAdjacentHTML('beforeend', `<option value="${esc(i.id)}">${esc(i.name)}</option>`));
-  const pre = qs('inst'); if (pre) sel.value = pre;
+  if (pre) sel.value = pre;
+  let page = 1;
   const draw = () => {
-    const g = {}; DB.slots().filter(s => (!sel.value || s.instId === sel.value) && (!$('#onlyFree').checked || DB.seatsLeft(s) > 0)).forEach(s => (g[s.date] = g[s.date] || []).push(s));
-    L.innerHTML = Object.keys(g).sort().map(k => `<div class="day-block"><h3>${esc(DB.fmtDate(k, true))}</h3>${g[k].map(s => { const i = DB.instructor(s.instId) || { name: '' }, left = DB.seatsLeft(s);
-      return `<div class="row-slot"><span class="t">${esc(DB.fmtTime(s.time))}</span><span class="who"><b>${esc(cLabel(s))}</b> with ${esc(i.name)} · ${esc(placeTxt(s))}</span><span class="badge ${left > 0 ? 'free' : 'taken'}">${left > 0 ? left + ' seat' + (left > 1 ? 's' : '') + ' left' : 'Full'}</span><a class="btn btn-primary btn-sm" href="instructor.html?id=${encodeURIComponent(s.instId)}&slot=${encodeURIComponent(s.id)}">View &amp; book</a></div>`; }).join('')}</div>`).join('') || '<div class="empty">No classes match. Try turning off the open-seats filter.</div>';
+    const all = DB.slots().filter(s => (!sel.value || s.instId === sel.value) && (!$('#onlyFree').checked || DB.seatsLeft(s) > 0));
+    const cut = slice(all, page); page = cut.page;
+    const g = {}; cut.rows.forEach(s => (g[s.date] = g[s.date] || []).push(s));
+    const body = Object.keys(g).map(k => `<div class="day-block"><h3>${esc(DB.fmtDate(k, true))}</h3>${g[k].map(s => { const i = DB.instructor(s.instId) || { name: '' }, left = DB.seatsLeft(s);
+      return `<div class="row-slot"><span class="t">${esc(DB.fmtTime(s.time))}</span><span class="who"><b>${esc(cLabel(s))}</b> with ${esc(i.name)} · ${esc(placeTxt(s))}</span><span class="badge ${left > 0 ? 'free' : 'taken'}">${left > 0 ? left + ' seat' + (left > 1 ? 's' : '') + ' left' : 'Full'}</span><a class="btn btn-primary btn-sm" href="${route('instructor.html', '?id=' + encodeURIComponent(s.instId) + '&slot=' + encodeURIComponent(s.id))}">View &amp; book</a></div>`; }).join('')}</div>`).join('') || '<div class="empty">No classes match. Try turning off the open-seats filter.</div>';
+    L.innerHTML = body + pager(cut.page, cut.pages, cut.total);
+    bindPager(L, n => { page = n; draw(); L.scrollIntoView({ block: 'start' }); });
   };
-  sel.onchange = draw; $('#onlyFree').onchange = draw; draw();
+  sel.onchange = () => { page = 1; draw(); }; $('#onlyFree').onchange = () => { page = 1; draw(); }; draw();
 };
 
 /* ---------------- courses ---------------- */
 P.courses = () => {
   const { cats, courses } = DB.catalog(), v = $('#view'), crumbs = $('#crumbs'), h1 = $('#h1'), sub = $('#sub');
+  if (!v || !crumbs || !h1 || !sub) return;
   const byId = id => cats.find(c => c.id === id), kids = id => cats.filter(c => c.parent === id);
   const ids = id => new Set([id, ...kids(id).map(k => k.id)]);
   const cardCat = c => { const n = courses.filter(x => ids(c.id).has(x.catId)).length;
-    return `<a class="cat" href="courses.html?cat=${encodeURIComponent(c.id)}"><div class="ic">${esc(c.ic || c.name[0])}</div><h3>${esc(c.name)}</h3><p>${esc(c.desc || '')}</p><small>${n} course${n === 1 ? '' : 's'}</small><span class="more">Explore ›</span></a>`; };
+    return `<a class="cat" href="${route('courses.html', '?cat=' + encodeURIComponent(c.id))}"><div class="ic">${esc(c.ic || c.name[0])}</div><h3>${esc(c.name)}</h3><p>${esc(c.desc || '')}</p><small>${n} course${n === 1 ? '' : 's'}</small><span class="more">Explore ›</span></a>`; };
   const cardCourse = c =>
-    `<a class="course" href="courses.html?cat=${encodeURIComponent(c.catId)}&course=${encodeURIComponent(c.id)}"><h3>${esc(c.name)}</h3><div class="meta">${c.mods ? c.mods + ' modules' : ''}${c.mods && c.wks ? ' · ' : ''}${c.wks ? c.wks + ' weeks' : ''}</div><p>${esc(c.desc || '')}</p><span class="more">See instructors ›</span></a>`;
+    `<a class="course" href="${route('courses.html', '?cat=' + encodeURIComponent(c.catId) + '&course=' + encodeURIComponent(c.id))}"><h3>${esc(c.name)}</h3><div class="meta">${c.mods ? c.mods + ' modules' : ''}${c.mods && c.wks ? ' · ' : ''}${c.wks ? c.wks + ' weeks' : ''}</div><p>${esc(c.desc || '')}</p><span class="more">See instructors ›</span></a>`;
   const cid = qs('cat'), kid = qs('course'), c = kid && DB.courseById(kid), cat = cid && byId(cid);
-  const trail = x => (x ? (x.parent && byId(x.parent) ? trail(byId(x.parent)) : '') + ` / <a href="courses.html?cat=${encodeURIComponent(x.id)}">${esc(x.name)}</a>` : '');
+  const trail = x => (x ? (x.parent && byId(x.parent) ? trail(byId(x.parent)) : '') + ` / <a href="${route('courses.html', '?cat=' + encodeURIComponent(x.id))}">${esc(x.name)}</a>` : '');
   if (c) {
     document.title = c.name + ' · Uni Boost';
-    const cc = byId(c.catId); crumbs.innerHTML = '<a href="index.html">Home</a> / <a href="courses.html">Courses</a>' + trail(cc) + ' / ' + esc(c.name);
+    const cc = byId(c.catId); crumbs.innerHTML = '<a href="' + route('index.html') + '">Home</a> / <a href="' + route('courses.html') + '">Courses</a>' + trail(cc) + ' / ' + esc(c.name);
     h1.textContent = c.name; sub.textContent = c.desc || '';
     const t = DB.priceInfo(c.name), ins = DB.instructorsFor(c);
     const rows = t ? [['Standard', t.base], ['Private (online)', t.single], ['Group of 2 to 4', t.g24], ['Group of 5+', t.g5]].filter(r => r[1] != null) : [];
-    v.innerHTML = (rows.length ? `<div class="panel" style="margin-top:10px"><h2>Pricing</h2>${rows.map(r => `<div class="pricebox" style="margin-top:10px"><span>${r[0]}</span><b>${esc(DB.money(r[1]))}</b></div>`).join('')}</div>` : '') +
-      `<h2 style="margin:34px 0 0;font-size:1.5rem">Instructors for this course</h2><div class="inst-grid">${ins.map(i => { const n = DB.slots(i.id).filter(s => DB.courseMatch(c, s.course) && DB.seatsLeft(s) > 0).length;
-        return `<a class="inst" href="instructor.html?id=${encodeURIComponent(i.id)}">${av(i)}<h3>${esc(i.name)}</h3><p class="role">${esc(i.title || '')}</p><p class="uni">${esc(i.university || '')}</p><span class="avail${n ? '' : ' none'}" style="display:block;margin-top:14px">${n ? n + ' open class' + (n > 1 ? 'es' : '') + ' for this course' : 'See all times'}</span></a>`; }).join('') || '<div class="empty">No instructor is assigned yet. Send a request and we will find you one.</div>'}</div>`;
+    let insPage = 1;
+    const paint = () => {
+      const insCut = slice(ins, insPage); insPage = insCut.page;
+      v.innerHTML = (rows.length ? `<div class="panel" style="margin-top:10px"><h2>Pricing</h2>${rows.map(r => `<div class="pricebox" style="margin-top:10px"><span>${r[0]}</span><b>${esc(DB.money(r[1]))}</b></div>`).join('')}</div>` : '') +
+        `<h2 style="margin:34px 0 0;font-size:1.5rem">Instructors for this course</h2><div class="inst-grid">${insCut.rows.map(i => { const n = DB.slots(i.id).filter(s => DB.courseMatch(c, s.course) && DB.seatsLeft(s) > 0).length;
+          return `<a class="inst" href="${route('instructor.html', '?id=' + encodeURIComponent(i.id))}">${av(i)}<h3>${esc(i.name)}</h3><p class="role">${esc(i.title || '')}</p><p class="uni">${esc(i.university || '')}</p><span class="avail${n ? '' : ' none'}" style="display:block;margin-top:14px">${n ? n + ' open class' + (n > 1 ? 'es' : '') + ' for this course' : 'See all times'}</span></a>`; }).join('') || '<div class="empty">No instructor is assigned yet. Send a request and we will find you one.</div>'}</div>${pager(insCut.page, insCut.pages, insCut.total)}`;
+      bindPager(v, n => { insPage = n; paint(); });
+    };
+    paint();
   } else if (cat) {
     document.title = cat.name + ' · Uni Boost';
-    crumbs.innerHTML = '<a href="index.html">Home</a> / <a href="courses.html">Courses</a>' + trail(cat).replace(/ \/ <a[^>]*>[^<]*<\/a>$/, ' / ' + esc(cat.name));
+    crumbs.innerHTML = '<a href="' + route('index.html') + '">Home</a> / <a href="' + route('courses.html') + '">Courses</a>' + trail(cat).replace(/ \/ <a[^>]*>[^<]*<\/a>$/, ' / ' + esc(cat.name));
     h1.textContent = cat.name; sub.textContent = cat.desc || 'Choose a course to see its instructors and times.';
     const own = courses.filter(x => x.catId === cat.id), sc = kids(cat.id);
-    v.innerHTML = (sc.length ? `<div class="cats">${sc.map(cardCat).join('')}</div>` : '') + (own.length ? `<div class="courses" style="${sc.length ? 'margin-top:40px' : ''}">${own.map(cardCourse).join('')}</div>` : '') || '';
-    if (!sc.length && !own.length) empty(v, 'No courses here yet.');
+    let cPage = 1, oPage = 1;
+    const paint = () => {
+      const scCut = slice(sc, cPage); cPage = scCut.page;
+      const ownCut = slice(own, oPage); oPage = ownCut.page;
+      v.innerHTML = (sc.length ? `<div class="cats">${scCut.rows.map(cardCat).join('')}</div>${pager(scCut.page, scCut.pages, scCut.total, 'cats')}` : '') + (own.length ? `<div class="courses" style="${sc.length ? 'margin-top:40px' : ''}">${ownCut.rows.map(cardCourse).join('')}</div>${pager(ownCut.page, ownCut.pages, ownCut.total, 'courses')}` : '');
+      if (!sc.length && !own.length) empty(v, 'No courses here yet.');
+      bindPager(v, (n, key) => { if (key === 'cats') cPage = n; else oPage = n; paint(); });
+    };
+    paint();
   } else {
-    crumbs.innerHTML = '<a href="index.html">Home</a> / Courses'; h1.innerHTML = 'Course <span class="accent">catalog</span>'; sub.textContent = 'Choose a subject area to see the courses you can book.';
-    const top = cats.filter(x => !x.parent); v.innerHTML = top.length ? `<div class="cats">${top.map(cardCat).join('')}</div>` : '<div class="empty">Courses will appear here soon.</div>';
+    crumbs.innerHTML = '<a href="' + route('index.html') + '">Home</a> / Courses'; h1.innerHTML = 'Course <span class="accent">catalog</span>'; sub.textContent = 'Choose a subject area to see the courses you can book.';
+    const top = cats.filter(x => !x.parent); let catPage = 1;
+    const paint = () => {
+      const cutTop = slice(top, catPage); catPage = cutTop.page;
+      v.innerHTML = top.length ? `<div class="cats">${cutTop.rows.map(cardCat).join('')}</div>${pager(cutTop.page, cutTop.pages, cutTop.total)}` : '<div class="empty">Courses will appear here soon.</div>';
+      bindPager(v, n => { catPage = n; paint(); });
+    };
+    paint();
   }
 };
 
@@ -264,11 +365,16 @@ const closeVideo = () => { const c = $('#vclose'); c && (c.onclick = () => { $('
 async function download(id, name) { try { const u = await fileUrl(id), a = document.createElement('a'); a.href = u; a.download = name || 'file'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); } catch (e) { say('Could not open the file'); } }
 
 P['my-classes'] = () => {
-  const L = $('#list'); let rows = [], phone = '', tab = 'up', go;
+  const L = $('#list'); let rows = [], phone = '', tab = 'up', page = 1, go;
   closeVideo();
+  if (DB.demo) {
+    const sub = document.querySelector('.page-hero .sub');
+    if (sub) sub.textContent = 'Preview student: ' + DB.demoPhone + ' · access code ' + DB.demoPin + '. Paid, pending, and unpaid classes are already booked.';
+  }
   const draw = () => {
     const now = new Date(), l = rows.filter(s => (DB.cls(s, now).phase === 'ended') === (tab === 'past'));
-    L.innerHTML = l.map(s => {
+    const cut = slice(l, page); page = cut.page;
+    L.innerHTML = (cut.rows.map(s => {
       const c = DB.cls(s, now), b = mineOf(s, phone), ps = payState(b), inst = DB.instructor(s.instId) || { name: '' }, online = DB.isOnline(s), ri = DB.recInfo(s, now);
       let link;
       if (ps !== 'paid') link = '<p>The class link unlocks once your payment is confirmed.</p>';
@@ -284,7 +390,8 @@ P['my-classes'] = () => {
       return `<div class="cc${c.phase === 'ended' ? ' ended' : ''}"><div class="cc-head"><div><h3>${esc(cLabel(s))}</h3><p class="meta">with ${esc(inst.name)} · ${esc(when(s))} · ${esc(placeTxt(s))}${b.kind === 'group' ? ' · group of ' + (+b.seats || 2) : b.kind === 'single' ? ' · private' : ''}</p></div><span class="status ${st[0]}">${st[1]}</span></div>
         <div class="cc-grid"><div class="cc-box"><h4>Class link</h4>${link}</div><div class="cc-box"><h4>Payment</h4>${pay}</div><div class="cc-box"><h4>Materials</h4>${mats || '<p>No materials yet.</p>'}${rec}</div></div>
         ${c.phase === 'upcoming' ? `<div class="actions" style="margin-top:16px"><button class="btn btn-danger btn-sm" data-c="${esc(s.id)}" style="flex:0 0 auto">Cancel booking</button></div>` : ''}</div>`;
-    }).join('') || `<div class="empty">${tab === 'up' ? 'No upcoming classes. <a href="schedule.html" style="color:var(--accent2)">Book one</a>.' : 'No past classes.'}</div>`;
+    }).join('') || '<div class="empty">' + (tab === 'up' ? 'No upcoming classes. <a href="' + route('schedule.html') + '" style="color:var(--accent2)">Book one</a>.' : 'No past classes.') + '</div>') + pager(cut.page, cut.pages, cut.total);
+    bindPager(L, n => { page = n; draw(); L.scrollIntoView({ block: 'start' }); });
     $$('[data-w]', L).forEach(b => b.onclick = () => watch(rows.find(x => x.id === b.dataset.w)));
     $$('[data-dl]', L).forEach(b => b.onclick = () => download(b.dataset.dl, b.dataset.n));
     $$('[data-c]', L).forEach(b => b.onclick = () => { if (confirm('Cancel this booking?')) { DB.cancelBooking(b.dataset.c, phone); say('Booking cancelled'); go(); } });
@@ -292,12 +399,16 @@ P['my-classes'] = () => {
       const m = box('<h3>Complete your payment</h3><div id="pf" style="margin-top:12px"></div>');
       payForm($('#pf', m.m), s.id, phone, () => { m.close(); say('Payment sent for confirmation'); go(); }, bk.price, bk); });
   };
-  $$('.tab').forEach(b => b.onclick = () => { tab = b.dataset.t; $$('.tab').forEach(x => x.classList.toggle('on', x === b)); draw(); });
-  go = lookup(L, (r, p) => { rows = r; phone = p; draw(); });
+  $$('.tab').forEach(b => b.onclick = () => { tab = b.dataset.t; page = 1; $$('.tab').forEach(x => x.classList.toggle('on', x === b)); draw(); });
+  go = lookup(L, (r, p) => { rows = r; phone = p; page = 1; draw(); });
 };
 
 P.recordings = () => {
-  const L = $('#list'); let rows = [], phone = '', cat = 'All', go; closeVideo();
+  const L = $('#list'); let rows = [], phone = '', cat = 'All', page = 1, go; closeVideo();
+  if (DB.demo) {
+    const sub = document.querySelector('.page-hero .sub');
+    if (sub) sub.textContent = 'Preview student: ' + DB.demoPhone + ' · access code ' + DB.demoPin + '. The sample recording unlocks because that class is marked paid.';
+  }
   const { cats, courses } = DB.catalog(), byId = id => cats.find(c => c.id === id);
   const draw = () => {
     const now = new Date(), items = rows.filter(s => s.rec).map(s => {
@@ -306,16 +417,20 @@ P.recordings = () => {
     }).sort((a, b) => (b.s.date + b.s.time).localeCompare(a.s.date + a.s.time));
     const names = ['All', ...new Set(items.map(x => x.top))];
     $('#filter').innerHTML = items.length ? names.map(n => `<button type="button" class="tab${n === cat ? ' on' : ''}">${esc(n)}<small>${n === 'All' ? items.length : items.filter(x => x.top === n).length}</small></button>`).join('') : '';
-    $$('#filter .tab').forEach((b, i) => b.onclick = () => { cat = names[i]; draw(); });
-    const g = {}; items.filter(x => cat === 'All' || x.top === cat).forEach(x => (((g[x.top] = g[x.top] || { ic: x.ic, subs: {} }).subs[x.sub] = g[x.top].subs[x.sub] || {})[x.course] = g[x.top].subs[x.sub][x.course] || []).push(x));
-    L.innerHTML = Object.keys(g).map(t => `<div class="rec-cat"><div class="rec-cat-h"><div class="ic">${esc(g[t].ic)}</div><div><h2>${esc(t)}</h2></div></div>${Object.keys(g[t].subs).map(sb => `${sb ? `<div class="rec-sub">${esc(sb)}</div>` : ''}${Object.keys(g[t].subs[sb]).map(cn => { const list = g[t].subs[sb][cn];
+    $$('#filter .tab').forEach((b, i) => b.onclick = () => { cat = names[i]; page = 1; draw(); });
+    const filtered = items.filter(x => cat === 'All' || x.top === cat);
+    const cut = slice(filtered, page); page = cut.page;
+    const g = {}; cut.rows.forEach(x => (((g[x.top] = g[x.top] || { ic: x.ic, subs: {} }).subs[x.sub] = g[x.top].subs[x.sub] || {})[x.course] = g[x.top].subs[x.sub][x.course] || []).push(x));
+    L.innerHTML = (Object.keys(g).map(t => `<div class="rec-cat"><div class="rec-cat-h"><div class="ic">${esc(g[t].ic)}</div><div><h2>${esc(t)}</h2></div></div>${Object.keys(g[t].subs).map(sb => `${sb ? `<div class="rec-sub">${esc(sb)}</div>` : ''}${Object.keys(g[t].subs[sb]).map(cn => { const list = g[t].subs[sb][cn];
       return `<div class="rec-course"><h3>${esc(cn)}<small>${list.length} recording${list.length > 1 ? 's' : ''}</small></h3>${list.map(x => { const s = x.s, ri = DB.recInfo(s, now), ps = payState(mineOf(s, phone)), inst = DB.instructor(s.instId) || { name: '' };
         const act = ps !== 'paid' ? `<span class="lock${ps === 'pending' ? ' wait' : ''}">${ps === 'pending' ? 'Payment under review' : 'Unlocks after payment'}</span>` : ri && ri.visible ? `<button class="btn btn-primary btn-sm" data-w="${esc(s.id)}">Watch</button>` : ri && ri.expired ? '<span class="lock">Expired</span>' : '<span class="lock wait">Not available yet</span>';
-        return `<div class="rec-row"><div><div class="t">${esc(DB.fmtDate(s.date, true))} · ${esc(DB.fmtTime(s.time))}</div><div class="m">${esc(inst.name)}${ri && ri.visible ? ' · <span class="left">available until ' + esc(DB.fmtDT(ri.until)) + '</span>' : ''}</div></div>${act}</div>`; }).join('')}</div>`; }).join('')}`).join('')}</div>`).join('') || '<div class="empty">No recordings for your classes yet.</div>';
+        return `<div class="rec-row"><div><div class="t">${esc(DB.fmtDate(s.date, true))} · ${esc(DB.fmtTime(s.time))}</div><div class="m">${esc(inst.name)}${ri && ri.visible ? ' · <span class="left">available until ' + esc(DB.fmtDT(ri.until)) + '</span>' : ''}</div></div>${act}</div>`; }).join('')}</div>`; }).join('')}`).join('')}</div>`).join('') || '<div class="empty">No recordings for your classes yet.</div>') + pager(cut.page, cut.pages, cut.total);
+    bindPager(L, n => { page = n; draw(); L.scrollIntoView({ block: 'start' }); });
     $$('[data-w]', L).forEach(b => b.onclick = () => watch(rows.find(x => x.id === b.dataset.w)));
   };
-  go = lookup(L, (r, p) => { rows = r; phone = p; draw(); });
+  go = lookup(L, (r, p) => { rows = r; phone = p; page = 1; draw(); });
 };
 
-if (P[pg]) P[pg]();
+window.UCC_PAGES = P;
+if (!window.__NEXT && P[pg]) P[pg]();
 })();

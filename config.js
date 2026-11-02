@@ -1,4 +1,3 @@
-window.UCC_CONFIG = {
-  url: 'https://txwxizkmmvkyotpmoloq.supabase.co',
-  key: 'sb_publishable_jgw8JtcOeL9cipPPl_tRWw_xXlOcrjG'
-};
+/* The Next.js app replaces this from Vercel environment variables before data.js runs.
+   Static pages do not ship a database key. */
+window.UCC_CONFIG = window.UCC_CONFIG || { url: '', key: '', preview: false };
